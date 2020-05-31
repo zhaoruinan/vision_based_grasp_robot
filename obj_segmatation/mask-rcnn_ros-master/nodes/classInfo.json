@@ -1,0 +1,105 @@
+{
+	"CLASSES":[
+		{
+        "supercategory": "food",
+        "id": 1,
+        "name": "aloe"
+        },
+        {
+        "supercategory": "toy",
+        "id": 2,
+        "name": "apple"
+        },
+        {
+        "supercategory": "toy",
+        "id": 3,
+        "name": "banana"
+        },
+        {
+        "supercategory": "utility",
+        "id": 4,
+        "name": "board_eraser"
+        },
+        {
+        "supercategory": "utility",
+        "id": 5,
+        "name": "clamp"
+        },
+        {
+        "supercategory": "toy",
+        "id": 6,
+        "name": "cube"
+        },
+        {
+        "supercategory": "utility",
+        "id": 7,
+        "name": "cup"
+        },
+        {
+        "supercategory": "food",
+        "id": 8,
+        "name": "diget"
+        },
+        {
+        "supercategory": "food",
+        "id": 9,
+        "name": "diget_sand"
+        },
+        {
+        "supercategory": "toy",
+        "id": 10,
+        "name": "duckie"
+        },
+        {
+        "supercategory": "toy",
+        "id": 11,
+        "name": "dumbbell"
+        },
+        {
+        "supercategory": "utility",
+        "id": 12,
+        "name": "glue"
+        },
+        {
+        "supercategory": "food",
+        "id": 13,
+        "name": "gotica"
+        },
+        {
+        "supercategory": "toy",
+        "id": 14,
+        "name": "orange"
+        },
+        {
+        "supercategory": "utility",
+        "id": 15,
+        "name": "padlock"
+        },
+        {
+        "supercategory": "utility",
+        "id": 16,
+        "name": "screw_driver"
+        },
+        {
+        "supercategory": "food",
+        "id": 17,
+        "name": "small_spam"
+        },
+        {
+        "supercategory": "toy",
+        "id": 18,
+        "name": "teddy_bear"
+        },
+        {
+        "supercategory": "food",
+        "id": 19,
+        "name": "tomato_soup"
+        },
+        {
+        "supercategory": "food",
+        "id": 20,
+        "name": "vitamin_water"
+        }
+	]
+}
+

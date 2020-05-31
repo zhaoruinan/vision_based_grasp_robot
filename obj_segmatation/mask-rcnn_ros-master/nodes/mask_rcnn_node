@@ -1,0 +1,350 @@
+#!/usr/bin/env python
+import os
+import threading
+import numpy as np
+
+import cv2
+from cv_bridge import CvBridge
+import rospy
+from sensor_msgs.msg import Image
+from sensor_msgs.msg import RegionOfInterest
+
+import IRL
+import utils
+import model as modellib
+import visualize
+from mask_rcnn_ros.msg import Result
+
+####################HYU ADDED##########################
+from one_msgs.msg import detectron_msg
+from one_msgs.msg import BoundingBox
+
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.patches import Polygon
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas  # added for webcam support
+from matplotlib.figure import Figure  # added for webcam support
+import tensorflow as tf
+
+import json
+ROOT_DIR = os.path.dirname( os.path.abspath( __file__ ) )
+###################HYU ADDED_END#######################
+
+# Local path to trained weights file
+ROS_HOME = os.environ.get('ROS_HOME', os.path.join(os.environ['HOME'], '.ros'))
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.7)
+sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+
+# IRL_MODEL_PATH = '/home/irobot/catkin_ws/src/mask-rcnn_ros-master/models/mask_rcnn_irl_20obj_191113.h5'
+IRL_MODEL_PATH = '/home/frank/catkin_ws/src/mask-rcnn_ros-master/models/mask_rcnn_irl_20obj_191113.h5'
+CLASS_NAMES = ['BG','aloe', 'apple', 'banana', 'board_eraser','clamp','cube',
+'cup','diget','diget_sand','duckie','dumbbell','glue','gotica','orange',
+'padlock','screw_driver','small_spam','teddy_bear','tomato_soup','vitamin_water']
+
+
+
+# IRL_MODEL_PATH = '/home/mau5/catkin_ws/src/mask_rcnn_ros-master/models/mask_rcnn_coco.h5'
+# CLASS_NAMES = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush']
+
+
+class InferenceConfig(IRL.IRLConfig):
+    # Set batch size to 1 since we'll be running inference on
+    # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
+    GPU_COUNT = 1              
+    IMAGES_PER_GPU = 1
+
+class MaskRCNNNode(object):
+
+    def __init__(self):
+        self._cv_bridge = CvBridge()
+
+        config = InferenceConfig()
+        config.display()
+
+        self._visualization = rospy.get_param('~visualization', True)
+
+        # Create model object in inference mode.
+        self._model = modellib.MaskRCNN(mode="inference", model_dir="",
+                                        config=config)
+        # Load weights trained on MS-COCO
+        model_path = rospy.get_param('~model_path', IRL_MODEL_PATH)
+
+        # Download COCO trained weights from Releases if needed
+        if model_path == IRL_MODEL_PATH and not os.path.exists(IRL_MODEL_PATH):
+            utils.download_trained_weights(IRL_MODEL_PATH)
+
+        self._model.load_weights(model_path, by_name=True)
+
+        self._class_names = rospy.get_param('~class_names', CLASS_NAMES)
+
+        self._last_msg = None
+        self._msg_lock = threading.Lock()
+        self._class_colors = visualize.random_colors(len(CLASS_NAMES))
+
+        self._publish_rate = rospy.get_param('~publish_rate', 100)
+
+        ###########################
+        self.theClasses = {}
+
+        with open(ROOT_DIR+'/classInfo.json') as json_file:
+
+            meta = json.load(json_file, encoding="utf-8")
+            self.theClasses = meta["CLASSES"]
+
+        self.pub_Detectron = detectron_msg()
+        self.pub_label_map = rospy.Publisher("/one_msgs/detectron_msg", detectron_msg, queue_size = 10)
+        self.pub_visual_img = rospy.Publisher("/one_msgs/detectron_visualizer_img", Image, queue_size = 10)
+        self.pub_visual_map = rospy.Publisher("/one_msgs/detectron_visualizer_map", Image, queue_size = 10)
+        ###########################
+
+    def run(self):
+
+        self._result_pub = rospy.Publisher('~result', Result, queue_size=1)
+        vis_pub = rospy.Publisher('~visualization', Image, queue_size=1)
+        rospy.Subscriber('~input', Image,
+                         self._image_callback, queue_size=1)
+
+        rate = rospy.Rate(self._publish_rate)
+
+        while not rospy.is_shutdown():
+
+            if self._msg_lock.acquire(False):
+                msg = self._last_msg
+                self._last_msg = None
+                self._msg_lock.release()
+            else:
+                rate.sleep()
+                continue
+
+            if msg is not None:
+                ######################
+                self.np_image = self._cv_bridge.imgmsg_to_cv2(msg, 'rgb8')
+                
+                # Run detection
+                results = self._model.detect([self.np_image], verbose=0)
+
+                result = results[0]
+                result_msg = self._build_result_msg(msg, result)
+                detectron_msg = self._pub_detectron_msg(msg, result)
+                # append RGB image to result_msg
+                # result_msg.rgb_img = msg
+
+                self._result_pub.publish(result_msg)
+
+                # Visualize results
+                if self._visualization:
+                    cv_result = self._visualize_cv(result, self.np_image)
+                    image_msg = self._cv_bridge.cv2_to_imgmsg(cv_result, 'rgb8')
+                    vis_pub.publish(image_msg)
+                    self.pub_visual_img.publish(image_msg)
+
+            rate.sleep()
+
+    #################HYU_START####################
+
+    def get_detectron_style_dataset(self):
+        classes = {}
+
+        return classes
+
+    def get_class_string_ros(self, class_index):
+        class_name = self.theClasses[class_index - 1]['name'] if self.theClasses is not None else \
+            'id{:d}'.format(class_index - 1)
+        class_id = self.theClasses[class_index - 1]['id'] if self.theClasses is not None else \
+            'id{:d}'.format(class_index - 1)
+        super_category = self.theClasses[class_index - 1]['supercategory'] if self.theClasses is not None else \
+            'supercategory{:d}'.format(class_index - 1)
+        return class_id, class_name, super_category
+
+    def convert_fig_to_numpy(self, fig):
+        """
+        Convert a matplotlib figure to a NumPy array with RGBA channels and return it.
+        @param fig a matplotlib figure
+        @return a numpy 3D array of RGBA values
+        """
+        # Be sure to draw the canvas once before we start. Otherwise, the renderer doesn't exist yet.
+        fig.canvas.draw()
+    
+        # Get the RGBA buffer from the figure
+        width, height = fig.canvas.get_width_height()
+        argb_pixmap = fig.canvas.tostring_argb()  # get pixmap in ARGB mode
+        buffer = np.fromstring(argb_pixmap, dtype=np.uint8)
+        buffer.shape = (height, width, 4)
+    
+        # Roll the Alpha channel ARGB so we get it in RGBA mode
+        buffer = np.roll(buffer, 3, axis = 2)
+        buffer = buffer[:, :, :3]
+
+        return buffer
+
+    def _pub_detectron_msg(self, msg, result):
+        
+        """ ************** np_image to self *****************"""
+        bboxMsg = BoundingBox()
+        bboxList = []
+
+        labelMap = np.zeros(np.shape(self.np_image), dtype=np.int8)
+
+        fig = plt.figure(frameon=False)
+        DPI = fig.get_dpi()
+        figInch = [self.np_image.shape[1] / DPI, self.np_image.shape[0] / DPI]
+
+        fig.set_size_inches(figInch[0], figInch[1])
+
+        ax = plt.Axes(fig, [0., 0., 1., 1.])
+
+        ax.axis('off')
+        
+        fig.add_axes(ax)
+        ax.imshow(labelMap)
+
+        pub_Detectron = detectron_msg()
+
+        for i, (y1, x1, y2, x2) in enumerate(result['rois']):
+
+            class_id = result['class_ids'][i]
+            class_name = self._class_names[class_id]
+            score = result['scores'][i]
+
+            color_mask = '#%02x%02x%02x' % (class_id, score * 100.0, i) # RGB
+
+            e = result['masks'][:, :, i]
+
+            _, contour, hier = cv2.findContours(
+                e.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+            if not contour:
+                continue
+
+            for c in contour:
+                polygon = Polygon(
+                    c.reshape((-1, 2)),
+                    fill=True, facecolor=color_mask,
+                    edgecolor='k', linewidth=1.0)
+
+                ax.add_patch(polygon)
+
+            bboxMsg = BoundingBox()
+            bboxMsg.classID, bboxMsg.className, bboxMsg.classSuperCat = self.get_class_string_ros(class_id)
+            bboxMsg.probability = score
+            bboxMsg.classLayer = i
+            bboxMsg.xmin = np.asscalar(x1)
+            bboxMsg.ymin = np.asscalar(y1)
+            bboxMsg.xmax = np.asscalar(x2)
+            bboxMsg.ymax = np.asscalar(y2)
+            bboxList.append(bboxMsg)
+
+
+        det_header_time = rospy.Time.now()
+        pub_Detectron.header.seq = self.imgheader.seq
+        pub_Detectron.header.stamp = det_header_time
+        pub_Detectron.header.frame_id = 'detectron_ros'
+
+        labelMap = self.convert_fig_to_numpy(fig)
+
+        labelMap = labelMap[..., ::-1]
+
+        if labelMap is not None:
+
+            pubLabelMap = self._cv_bridge.cv2_to_imgmsg(labelMap, "passthrough")
+            pub_Detectron.labelMap = pubLabelMap
+            pub_Detectron.labelMap.header.seq = self.imgheader.seq
+            pub_Detectron.labelMap.header.stamp = det_header_time
+            pub_Detectron.labelMap.header.frame_id = 'detectron_label'
+            pub_Detectron.BoundingBoxes = bboxList
+            self.pub_visual_map.publish(pubLabelMap)
+            self.pub_label_map.publish(pub_Detectron)
+        else:
+
+            labelMap[:y0, :x0] = 0
+
+
+        # cv2.imshow("ho", labelMap)
+        # cv2.waitKey(1)
+        plt.close('all')
+
+        return
+    #################HYU_END####################
+
+    def _build_result_msg(self, msg, result):
+
+        result_msg = Result()
+        result_msg.header = msg.header
+
+        for i, (y1, x1, y2, x2) in enumerate(result['rois']):
+
+            box = RegionOfInterest()
+            box.x_offset = np.asscalar(x1)
+            box.y_offset = np.asscalar(y1)
+            box.height = np.asscalar(y2 - y1)
+            box.width = np.asscalar(x2 - x1)
+            result_msg.boxes.append(box)
+
+            class_id = result['class_ids'][i]
+            result_msg.class_ids.append(class_id)
+
+            class_name = self._class_names[class_id]
+            result_msg.class_names.append(class_name)
+
+            score = result['scores'][i]
+            result_msg.scores.append(score)
+
+            mask = Image()
+            mask.header = msg.header
+            mask.height = result['masks'].shape[0]
+            mask.width = result['masks'].shape[1]
+            mask.encoding = "mono8"
+            mask.is_bigendian = False
+            mask.step = mask.width
+            mask.data = (result['masks'][:, :, i]).tobytes()
+
+            result_msg.masks.append(mask)
+
+        return result_msg
+
+    def _visualize(self, result, image):
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+
+        fig = Figure()
+        canvas = FigureCanvasAgg(fig)
+        axes = fig.gca()
+        visualize.display_instances(image, result['rois'], result['masks'],
+                                    result['class_ids'], CLASS_NAMES,
+                                    result['scores'], ax=axes,
+                                    class_colors=self._class_colors)
+        fig.tight_layout()
+        canvas.draw()
+        result = np.fromstring(canvas.tostring_rgb(), dtype='uint8')
+
+        _, _, w, h = fig.bbox.bounds
+        result = result.reshape((int(h), int(w), 3))
+        return result
+
+    def _visualize_cv(self, result, image):
+
+        image = visualize.display_instances_cv(image, result['rois'], result['masks'],
+                                               result['class_ids'], CLASS_NAMES,
+                                               result['scores'],
+                                               class_colors=self._class_colors)
+
+        return image
+
+    def _image_callback(self, msg):
+        rospy.logdebug("Get an image")
+        ##############
+        self.imgheader = msg.header
+        ##############
+        if self._msg_lock.acquire(False):
+            self._last_msg = msg
+            self._msg_lock.release()
+
+def main():
+    rospy.init_node('mask_rcnn')
+
+    node = MaskRCNNNode()
+    node.run()
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,28 @@
+{
+    "configurations": [
+        {
+            "browse": {
+                "databaseFilename": "",
+                "limitSymbolsToIncludedHeaders": true
+            },
+            "includePath": [
+                "/home/mau5/catkin_ws/devel/include",
+                "/opt/ros/kinetic/include",
+                "/home/mau5/catkin_ws/src/detectron_ros/include",
+                "/home/mau5/catkin_ws/src/image_publisher/include",
+                "/home/mau5/catkin_ws/src/quick_camera_calibration/include",
+                "/home/mau5/catkin_ws/src/realsense-ros/realsense2_camera/include",
+                "/home/mau5/catkin_ws/src/solution_one/include",
+                "/home/mau5/catkin_ws/src/universal_robot/ur_kinematics/include",
+                "/home/mau5/catkin_ws/src/ur_modern_driver/include",
+                "/usr/include"
+            ],
+            "name": "Linux",
+            "intelliSenseMode": "gcc-x64",
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
+}
